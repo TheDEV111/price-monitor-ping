@@ -202,7 +202,192 @@
 )
 
 ;; private functions
-;;
+;; Helper function to check if user is contract owner
+(define-private (is-contract-owner (user principal))
+  (is-eq user CONTRACT-OWNER)
+)
+
+;; Helper function to check if contract is active
+(define-private (is-contract-active)
+  (is-eq (var-get contract-status) STATUS-ACTIVE)
+)
+
+;; Helper function to validate price within acceptable range
+(define-private (is-price-valid (price uint))
+  (and 
+    (>= price MIN-PRICE-THRESHOLD)
+    (<= price MAX-PRICE-THRESHOLD)
+    (> price u0)
+  )
+)
+
+;; Helper function to check if price data is still fresh
+(define-private (is-price-fresh (timestamp uint))
+  (let ((current-block block-height))
+    (<= (- current-block timestamp) PRICE-VALIDITY-PERIOD)
+  )
+)
+
+;; Calculate percentage change between two prices (returns int, can be negative)
+(define-private (calculate-percentage-change (old-price uint) (new-price uint))
+  (if (is-eq old-price u0)
+    0 ;; Return 0 if old price is zero to avoid division by zero
+    (let (
+      (price-diff (if (>= new-price old-price) 
+                     (- new-price old-price) 
+                     (- old-price new-price)))
+      (percentage (* (/ (* price-diff BASIS-POINTS-MULTIPLIER) old-price) u1))
+      (is-positive (>= new-price old-price))
+    )
+      (if is-positive 
+        (to-int percentage)
+        (- (to-int percentage))
+      )
+    )
+  )
+)
+
+;; Check if price change exceeds threshold
+(define-private (exceeds-threshold (old-price uint) (new-price uint) (threshold uint))
+  (let ((change-percentage (calculate-percentage-change old-price new-price)))
+    (>= (if (>= change-percentage 0) 
+          (to-uint change-percentage) 
+          (to-uint (- change-percentage))) 
+        threshold)
+  )
+)
+
+;; Validate admin permissions for specific actions
+(define-private (has-admin-permission (user principal) (permission-type uint))
+  (match (map-get? admin-permissions { admin: user })
+    admin-data 
+    (let ((level (get permission-level admin-data)))
+      (or 
+        (is-eq level u4) ;; Super admin has all permissions
+        (and (is-eq permission-type u1) (>= level u1)) ;; Read permission
+        (and (is-eq permission-type u2) (>= level u2)) ;; Write permission
+        (and (is-eq permission-type u3) (>= level u3)) ;; Admin permission
+      )
+    )
+    false ;; No permissions if not found
+  )
+)
+
+;; Calculate reliability score based on successful submissions
+(define-private (calculate-reliability-score (successful uint) (total uint))
+  (if (is-eq total u0)
+    u50 ;; Default score for new sources
+    (let ((score (/ (* successful u100) total)))
+      (if (> score u100) u100 score) ;; Cap at 100
+    )
+  )
+)
+
+;; Check if price source is authorized and reliable
+(define-private (is-source-reliable (source principal) (min-reliability uint))
+  (match (map-get? price-sources { source: source })
+    source-data
+    (and 
+      (get is-authorized source-data)
+      (>= (get reliability-score source-data) min-reliability)
+    )
+    false
+  )
+)
+
+;; Calculate volatility score based on price history
+(define-private (calculate-volatility-score (price-changes (list 10 int)))
+  (let (
+    (sum-squares (fold + (map square-int price-changes) u0))
+    (count (len price-changes))
+  )
+    (if (is-eq count u0)
+      u0
+      (/ sum-squares count) ;; Simple volatility calculation
+    )
+  )
+)
+
+;; Helper function to square an integer for volatility calculation
+(define-private (square-int (x int))
+  (let ((abs-x (if (>= x 0) (to-uint x) (to-uint (- x)))))
+    (* abs-x abs-x)
+  )
+)
+
+;; Check if circuit breaker should be triggered
+(define-private (should-trigger-circuit-breaker (asset (string-ascii 10)) (price uint))
+  (match (map-get? asset-metadata { asset: asset })
+    asset-data
+    (let ((threshold (get circuit-breaker-threshold asset-data)))
+      (or 
+        (> price (* (get max-price asset-data) u2)) ;; Price more than 2x max
+        (< price (/ (get min-price asset-data) u2)) ;; Price less than half min
+        (> price threshold) ;; Above circuit breaker threshold
+      )
+    )
+    false
+  )
+)
+
+;; Validate subscription parameters
+(define-private (is-subscription-valid (threshold-up uint) (threshold-down uint) (notification-type uint))
+  (and 
+    (>= threshold-up MIN-PRICE-THRESHOLD)
+    (<= threshold-up MAX-PRICE-THRESHOLD)
+    (>= threshold-down MIN-PRICE-THRESHOLD)
+    (<= threshold-down MAX-PRICE-THRESHOLD)
+    (> threshold-up threshold-down) ;; Upper threshold must be higher
+    (and (>= notification-type u1) (<= notification-type u3)) ;; Valid notification type
+  )
+)
+
+;; Generate unique ping ID
+(define-private (generate-ping-id)
+  (let ((current-pings (var-get total-pings)))
+    (var-set total-pings (+ current-pings u1))
+    current-pings
+  )
+)
+
+;; Check if enough time has passed since last ping
+(define-private (can-ping-now (last-ping-block uint))
+  (>= (- block-height last-ping-block) MAX-PING-FREQUENCY)
+)
+
+;; Validate asset name format
+(define-private (is-asset-name-valid (asset (string-ascii 10)))
+  (and 
+    (> (len asset) u0)
+    (<= (len asset) u10)
+  )
+)
+
+;; Update source reliability score after submission
+(define-private (update-source-reliability (source principal) (was-successful bool))
+  (match (map-get? price-sources { source: source })
+    source-data
+    (let (
+      (new-total (+ (get total-submissions source-data) u1))
+      (new-successful (if was-successful 
+                        (+ (get successful-submissions source-data) u1)
+                        (get successful-submissions source-data)))
+      (new-score (calculate-reliability-score new-successful new-total))
+    )
+      (map-set price-sources 
+        { source: source }
+        (merge source-data {
+          total-submissions: new-total,
+          successful-submissions: new-successful,
+          reliability-score: new-score,
+          last-submission-block: block-height
+        })
+      )
+      true
+    )
+    false
+  )
+)
 
 ;; public functions
 ;;
