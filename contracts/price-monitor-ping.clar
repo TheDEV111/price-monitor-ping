@@ -43,7 +43,163 @@
 (define-constant STATUS-EMERGENCY u3)
 
 ;; data maps and vars
-;;
+;; Contract state variables
+(define-data-var contract-status uint STATUS-ACTIVE)
+(define-data-var total-pings uint u0)
+(define-data-var last-emergency-block uint u0)
+(define-data-var monitoring-enabled bool true)
+
+;; Price data storage
+(define-map price-data
+  { asset: (string-ascii 10), source: principal }
+  {
+    price: uint,
+    timestamp: uint,
+    block-height: uint,
+    confidence: uint, ;; Confidence level (0-100)
+    volume: uint,
+    is-verified: bool
+  }
+)
+
+;; Historical price tracking for trend analysis
+(define-map price-history
+  { asset: (string-ascii 10), block-height: uint }
+  {
+    price: uint,
+    change-percentage: int, ;; Can be negative
+    volume: uint,
+    volatility-score: uint
+  }
+)
+
+;; Price monitoring configurations per asset
+(define-map asset-monitors
+  { asset: (string-ascii 10) }
+  {
+    upper-threshold: uint,
+    lower-threshold: uint,
+    percentage-change-threshold: uint,
+    is-active: bool,
+    alert-count: uint,
+    last-alert-block: uint,
+    owner: principal
+  }
+)
+
+;; Authorized price sources and their reliability scores
+(define-map price-sources
+  { source: principal }
+  {
+    is-authorized: bool,
+    reliability-score: uint, ;; 0-100 based on historical accuracy
+    total-submissions: uint,
+    successful-submissions: uint,
+    last-submission-block: uint,
+    stake-amount: uint
+  }
+)
+
+;; User subscriptions for price alerts
+(define-map user-subscriptions
+  { user: principal, asset: (string-ascii 10) }
+  {
+    notification-type: uint, ;; 1=email, 2=webhook, 3=on-chain
+    threshold-up: uint,
+    threshold-down: uint,
+    is-active: bool,
+    subscription-fee-paid: uint,
+    expiry-block: uint
+  }
+)
+
+;; Ping/Alert history for analytics
+(define-map ping-history
+  { ping-id: uint }
+  {
+    asset: (string-ascii 10),
+    trigger-type: uint, ;; 1=threshold, 2=percentage, 3=emergency
+    old-price: uint,
+    new-price: uint,
+    block-height: uint,
+    affected-users: uint,
+    severity: uint ;; 1=low, 2=medium, 3=high, 4=critical
+  }
+)
+
+;; Asset metadata and configuration
+(define-map asset-metadata
+  { asset: (string-ascii 10) }
+  {
+    full-name: (string-ascii 50),
+    decimals: uint,
+    is-active: bool,
+    min-price: uint,
+    max-price: uint,
+    circuit-breaker-threshold: uint, ;; Emergency stop threshold
+    total-monitors: uint
+  }
+)
+
+;; Governance and admin controls
+(define-map admin-permissions
+  { admin: principal }
+  {
+    can-pause-contract: bool,
+    can-add-sources: bool,
+    can-modify-thresholds: bool,
+    can-emergency-stop: bool,
+    permission-level: uint ;; 1=read, 2=write, 3=admin, 4=super-admin
+  }
+)
+
+;; Performance metrics and analytics
+(define-map performance-metrics
+  { metric-type: (string-ascii 20), period: uint }
+  {
+    value: uint,
+    timestamp: uint,
+    metadata: (string-ascii 100)
+  }
+)
+
+;; Staking and incentive system for price sources
+(define-map source-stakes
+  { source: principal }
+  {
+    staked-amount: uint,
+    lock-period: uint,
+    unlock-block: uint,
+    earned-rewards: uint,
+    penalty-count: uint,
+    last-reward-block: uint
+  }
+)
+
+;; Circuit breaker for emergency situations
+(define-map circuit-breakers
+  { asset: (string-ascii 10) }
+  {
+    is-triggered: bool,
+    trigger-price: uint,
+    trigger-block: uint,
+    trigger-reason: (string-ascii 50),
+    cooldown-period: uint,
+    reset-block: uint
+  }
+)
+
+;; Cross-chain price data (for future expansion)
+(define-map cross-chain-prices
+  { asset: (string-ascii 10), chain: (string-ascii 20) }
+  {
+    price: uint,
+    bridge-fee: uint,
+    last-sync-block: uint,
+    is-synced: bool,
+    price-deviation-percentage: int
+  }
+)
 
 ;; private functions
 ;;
